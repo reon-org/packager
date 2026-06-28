@@ -215,7 +215,7 @@ jobs:
             useradd -m builder-${name} 2>/dev/null || true
             chown -R "builder-${name}:builder-${name}" "$work"
             cd "$work"
-            sudo -u builder env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --nosign
+            sudo -u "builder-${name}" env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --nosign
 
             cp "$work/pkgdest/rind-units-${name}-${PKGVER}-any.pkg.tar.zst" /arch/os/x86_64/
             repo-add /arch/os/x86_64/rind.db.tar.zst "/arch/os/x86_64/rind-units-${name}-${PKGVER}-any.pkg.tar.zst"
