@@ -3,39 +3,48 @@ name: Build and package Rind
 on:
   push:
     tags:
-      - "*"
+      - '*'
   workflow_dispatch:
 
 env:
   RIND_REPO: https://codeberg.org/bushyice/rind.git
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.v.outputs.ver }}
+      rel: ${{ steps.v.outputs.rel }}
+    steps:
+      - id: v
+        run: |
+          if [[ '${{ github.event_name }}' == 'push' && '${{ github.ref_type }}' == 'tag' ]]; then
+            TAG=${{ github.ref_name }}
+            echo "ver=${TAG#v}" >> $GITHUB_OUTPUT
+            echo "rel=1" >> $GITHUB_OUTPUT
+          else
+            echo "ver=$(date +%Y.%m.%d)" >> $GITHUB_OUTPUT
+            echo "rel=1" >> $GITHUB_OUTPUT
+          fi
+
   build:
     name: ${{ matrix.target }}
+    needs: version
     runs-on: ubuntu-latest
     strategy:
       matrix:
         target:
           - x86_64-unknown-linux-gnu
-          # - x86_64-unknown-linux-musl
           - aarch64-unknown-linux-gnu
-          # - aarch64-unknown-linux-musl
     steps:
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{ matrix.target }}
 
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
       - name: Install aarch64 glibc cross-toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Install cargo-zigbuild (aarch64 musl)
-        if: matrix.target == 'aarch64-unknown-linux-musl'
-        run: cargo install cargo-zigbuild
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Clone rind source
         run: git clone --depth 1 ${{ env.RIND_REPO }} /tmp/rind
@@ -44,9 +53,6 @@ jobs:
         run: |
           cd /tmp/rind
           case '${{ matrix.target }}' in
-            aarch64-unknown-linux-musl)
-              cargo zigbuild --workspace --release --target ${{ matrix.target }}
-              ;;
             aarch64-unknown-linux-gnu)
               CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
               cargo build --workspace --release --target ${{ matrix.target }}
@@ -72,26 +78,20 @@ jobs:
 
           cp /tmp/rind/target/$TARGET/release/rind $PKG/usr/bin/rind
 
-          # applet symlinks
           for applet in run0 sysunit syssess syslogs sysinvoke sysperms; do
             ln -s rind $PKG/usr/bin/$applet
           done
 
           cp /tmp/rind/target/$TARGET/release/init $PKG/sbin/init
-
           cp /tmp/rind/target/$TARGET/release/librind_api_sys.so $PKG/usr/lib/librind_api.so
-
           cp /tmp/rind/crates/api-sys/examples/rind.h $PKG/usr/include/rind.h
-
           cp /tmp/rind/target/$TARGET/release/libtty_plugin.so $PKG/usr/lib/rind/plugins/libtty_plugin.so
-          # rename networking to .so.0 so it's disabled by default
           cp /tmp/rind/target/$TARGET/release/libnetworking.so $PKG/usr/lib/rind/plugins/libnetworking.so.0
 
           cp -r /tmp/rind/crates $PKG/opt/rind/sdk/
           cp /tmp/rind/Cargo.toml $PKG/opt/rind/sdk/
           cp /tmp/rind/Cargo.lock $PKG/opt/rind/sdk/
 
-          # rlibs
           for lib in librind_api librind_api_sys librind_cfg librind_common librind_core librind_flow librind_ipc librind_macros librind_plugins librind_primitives librind_services; do
             cp "$DEPS/${lib}"*.rmeta "$PKG/opt/rind/sdk/stubs/" 2>/dev/null || true
             cp "$DEPS/${lib}"*.rlib  "$PKG/opt/rind/sdk/stubs/" 2>/dev/null || true
@@ -106,16 +106,170 @@ jobs:
           name: rind-${{ matrix.target }}
           path: /tmp/rind-${{ matrix.target }}.tar.gz
 
+  arch-repo:
+    name: Arch Linux package
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rind-x86_64-unknown-linux-gnu
+          path: /tmp/artifacts
+
+      - name: Create Arch package and repo
+        run: |
+          VER=${{ needs.version.outputs.ver }}
+          REL=${{ needs.version.outputs.rel }}
+          mkdir -p /tmp/arch/os/x86_64
+
+          docker run --rm \
+            -e VER="$VER" \
+            -e REL="$REL" \
+            -v /tmp/artifacts:/artifacts:ro \
+            -v /tmp/arch:/arch:rw \
+            archlinux:latest \
+            bash -e << 'SCRIPT'
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm base-devel sudo zstd
+
+          PKGVER="${VER}-${REL}"
+
+          mkdir -p /build/srcdir /build/pkgdest
+          cd /build
+          tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C srcdir
+
+          cat > PKGBUILD << EOF
+pkgname=rind
+pkgver=$VER
+pkgrel=$REL
+pkgdesc='An experimental state-based init system'
+arch=('x86_64')
+url='https://codeberg.org/bushyice/rind'
+license=('MPL-2.0')
+depends=('glibc')
+provides=('rind')
+source=()
+
+package() {
+  cp -r \$srcdir/* "\$pkgdir"
+}
+EOF
+
+          chmod -R a+rw /build
+          useradd -m builder
+          chown -R builder:builder /build
+
+          cd /build
+          sudo -u builder PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --nosign
+
+          mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
+          repo-add /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
+SCRIPT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-repo
+          path: /tmp/arch
+
+  void-repo:
+    name: Void Linux package
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rind-*-unknown-linux-gnu
+          path: /tmp/artifacts
+
+      - name: Create Void packages and repo
+        run: |
+          VER=${{ needs.version.outputs.ver }}
+          REL=${{ needs.version.outputs.rel }}
+          mkdir -p /tmp/void
+
+          docker run --rm \
+            -e VER="$VER" \
+            -e REL="$REL" \
+            -v /tmp/artifacts:/artifacts:ro \
+            -v /tmp/void:/void:rw \
+            voidlinux/voidlinux:latest \
+            bash -e << 'SCRIPT'
+          xbps-install -Syu --yes xbps
+
+          for arch in x86_64 aarch64; do
+            target="${arch}-unknown-linux-gnu"
+            pkgdir="/build/${target}"
+
+            rm -rf /build
+            mkdir -p "$pkgdir"
+            tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
+
+            cd /build
+            xbps-create \
+              -A "${arch}" \
+              -n "rind-${VER}_${REL}" \
+              -s "An experimental state-based init system" \
+              --homepage "https://codeberg.org/bushyice/rind" \
+              --license "MPL-2.0" \
+              --dependencies "glibc" \
+              "$pkgdir"
+
+            pkgfile="rind-${VER}_${REL}.${arch}.xbps"
+            mkdir -p "/void/${arch}"
+            mv "$pkgfile" "/void/${arch}/"
+          done
+
+          xbps-rindex -a /void/*/*.xbps
+SCRIPT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: void-repo
+          path: /tmp/void
+
+  pages:
+    name: Deploy package repos to Pages
+    needs: [arch-repo, void-repo]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-repo'
+          path: /tmp/repos
+
+      - name: Combine repos
+        run: |
+          mkdir -p /tmp/pages
+          cp -r /tmp/repos/arch-repo/arch /tmp/pages/arch
+          cp -r /tmp/repos/void-repo/* /tmp/pages/void/
+          ls -laR /tmp/pages
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/pages
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
   release:
-    needs: build
+    name: Release assets
+    needs: [version, build, arch-repo, void-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
 
@@ -147,6 +301,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for asset in /tmp/artifacts/*/*.tar.gz; do
+          for asset in /tmp/artifacts/rind-*-unknown-linux-gnu/*.tar.gz; do
+            gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
+          done
+          for asset in /tmp/artifacts/arch-repo/arch/os/*/rind-*.pkg.tar.zst; do
+            gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
+          done
+          for asset in /tmp/artifacts/void-repo/*/rind-*.xbps; do
             gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
           done
