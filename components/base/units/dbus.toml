@@ -1,0 +1,24 @@
+[unit]
+description = "D-Bus System Message Bus"
+
+[[socket]]
+name = "socket"
+description = "D-Bus System Message Bus Socket"
+listen = "/run/dbus/system_bus_socket"
+type = "uds"
+after = ["udev:daemon"]
+owner = "dbus:ser"
+lifecycle = "owned"
+on-start = [{ facet = "dbus:up!" }]
+
+[[service]]
+name = "daemon"
+description = "D-Bus System Message Bus Service"
+run.exec = "/usr/bin/dbus-daemon"
+run.args = ["--system", "--nofork", "--nopidfile"]
+singleton = true
+restart = true
+
+[[facet]]
+name = "up!"
+payload = "none"

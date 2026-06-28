@@ -1,0 +1,2 @@
+command = "/usr/bin/udevadm"
+args = ["trigger", "--action=add"]

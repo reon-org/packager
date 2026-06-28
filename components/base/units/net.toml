@@ -1,0 +1,11 @@
+[unit]
+description = "Network Manager"
+
+[[service]]
+name = "NetworkManager"
+description = "Network Manager"
+run.exec = "/usr/bin/NetworkManager"
+run.args = ["--no-daemon"]
+restart = true
+start-on = ["dbus:up!"]
+singleton = true

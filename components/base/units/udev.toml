@@ -1,0 +1,9 @@
+[unit]
+description = "Rule-based Manager for Device Events and Files"
+
+[[service]]
+name = "daemon"
+description = "Daemon for udev"
+run.exec = "/usr/bin/udevd"
+start-on = ["rind:up!"]
+on-start = { hook = "udev" }

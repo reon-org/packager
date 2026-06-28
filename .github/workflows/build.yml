@@ -111,12 +111,14 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           pattern: rind-x86_64-unknown-linux-gnu
           path: /tmp/artifacts
 
-      - name: Create Arch package and repo
+      - name: Create Arch package (rind)
         run: |
           VER=${{ needs.version.outputs.ver }}
           REL=${{ needs.version.outputs.rel }}
@@ -166,6 +168,72 @@ jobs:
             archlinux:latest \
             /bin/bash /build-arch.sh
 
+      - name: Create Arch packages (components)
+        run: |
+          VER=${{ needs.version.outputs.ver }}
+          REL=${{ needs.version.outputs.rel }}
+          PKGVER="${VER}-${REL}"
+
+          COMP_NAMES=""
+          for comp in components/*/; do
+            COMP_NAMES="$COMP_NAMES $(basename "$comp")"
+          done
+          [ -n "$COMP_NAMES" ] || exit 0
+
+          cat > /tmp/build-comps.sh << 'SCRIPTCP'
+          #!/bin/bash
+          set -e
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm base-devel sudo zstd
+
+          PKGVER="${VER}-${REL}"
+
+          for name in $COMP_NAMES; do
+            work="/build/${name}"
+            src="/components/${name}"
+            mkdir -p "$work/src" "$work/pkgdest"
+            cp -r "$src/"* "$work/src/"
+
+            {
+              echo "pkgname=rind-units-${name}"
+              echo "pkgver=$VER"
+              echo "pkgrel=$REL"
+              echo "pkgdesc=Rind units and hooks -- ${name}"
+              echo 'arch=("any")'
+              echo 'url="https://codeberg.org/bushyice/rind"'
+              echo 'license=("MPL-2.0")'
+              echo 'source=()'
+              echo 'package() {'
+              echo '  cd "$srcdir"'
+              echo '  [ -d units ] && install -d "$pkgdir/usr/lib/rind/units" && cp -r units/* "$pkgdir/usr/lib/rind/units/"'
+              echo '  [ -d hooks ] && install -d "$pkgdir/usr/lib/rind/hooks" && cp -r hooks/* "$pkgdir/usr/lib/rind/hooks/"'
+              echo '}'
+            } > "$work/PKGBUILD"
+
+            chmod -R a+rw "$work"
+            useradd -m builder-${name} 2>/dev/null || true
+            chown -R builder:builder "$work"
+            cd "$work"
+            sudo -u builder env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --nosign
+
+            cp "$work/pkgdest/rind-units-${name}-${PKGVER}-any.pkg.tar.zst" /arch/os/x86_64/
+            repo-add /arch/os/x86_64/rind.db.tar.zst "/arch/os/x86_64/rind-units-${name}-${PKGVER}-any.pkg.tar.zst"
+          done
+          SCRIPTCP
+
+          chmod +x /tmp/build-comps.sh
+
+          docker run --rm \
+            -e VER="$VER" \
+            -e REL="$REL" \
+            -e COMP_NAMES="$COMP_NAMES" \
+            -v "$(pwd)/components:/components:ro" \
+            -v /tmp/arch:/arch:rw \
+            -v /tmp/build-comps.sh:/build-comps.sh:ro \
+            archlinux:latest \
+            /bin/bash /build-comps.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: arch-repo
@@ -176,6 +244,8 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           pattern: rind-*-unknown-linux-gnu
@@ -187,20 +257,26 @@ jobs:
           REL=${{ needs.version.outputs.rel }}
           mkdir -p /tmp/void
 
+          COMP_NAMES=""
+          for comp in components/*/; do
+            COMP_NAMES="$COMP_NAMES $(basename "$comp")"
+          done
+
           docker run --rm \
             -e VER="$VER" \
             -e REL="$REL" \
+            -e COMP_NAMES="$COMP_NAMES" \
             -v /tmp/artifacts:/artifacts:ro \
             -v /tmp/void:/void:rw \
+            -v "$(pwd)/components:/components:ro" \
             voidlinux/voidlinux:latest \
             sh -c '
             set -e
 
             for arch in x86_64 aarch64; do
               target="${arch}-unknown-linux-gnu"
-              pkgdir="/build/${target}"
-
               rm -rf /build
+              pkgdir="/build/rind-${target}"
               mkdir -p "$pkgdir"
               tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
 
@@ -217,6 +293,29 @@ jobs:
               pkgfile="rind-${VER}_${REL}.${arch}.xbps"
               mkdir -p "/void/${arch}"
               mv "$pkgfile" "/void/${arch}/"
+            done
+
+            mkdir -p /void/noarch
+
+            for name in $COMP_NAMES; do
+              rm -rf /build
+              staging="/build/${name}"
+              mkdir -p "$staging/usr/lib/rind/units" "$staging/usr/lib/rind/hooks"
+
+              src="/components/${name}"
+              [ -d "$src/units" ] && cp -r "$src/units/"* "$staging/usr/lib/rind/units/"
+              [ -d "$src/hooks" ] && cp -r "$src/hooks/"* "$staging/usr/lib/rind/hooks/"
+
+              cd /build
+              xbps-create \
+                -A noarch \
+                -n "rind-units-${name}-${VER}_${REL}" \
+                -s "Rind units and hooks -- ${name}" \
+                --homepage "https://codeberg.org/bushyice/rind" \
+                --license "MPL-2.0" \
+                "$staging"
+
+              mv "rind-units-${name}-${VER}_${REL}.noarch.xbps" "/void/noarch/"
             done
 
             xbps-rindex -a /void/*/*.xbps
