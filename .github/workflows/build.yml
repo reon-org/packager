@@ -3,11 +3,11 @@ name: Build and package Rind
 on:
   push:
     tags:
-      - '*'
+      - "*"
   workflow_dispatch:
 
 env:
-  RIND_REPO: https://codeberg.org/bushyice/rind.git
+  RIND_REPO: https://codeberg.org/reon/rind.git
 
 jobs:
   version:
@@ -140,21 +140,20 @@ jobs:
           tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C srcdir
 
           cat > PKGBUILD << EOF
-pkgname=rind
-pkgver=$VER
-pkgrel=$REL
-pkgdesc='An experimental state-based init system'
-arch=('x86_64')
-url='https://codeberg.org/bushyice/rind'
-license=('MPL-2.0')
-depends=('glibc')
-provides=('rind')
-source=()
-
-package() {
-  cp -r \$srcdir/* "\$pkgdir"
-}
-EOF
+          pkgname=rind
+          pkgver=$VER
+          pkgrel=$REL
+          pkgdesc='An experimental state-based init system'
+          arch=('x86_64')
+          url='https://codeberg.org/bushyice/rind'
+          license=('MPL-2.0')
+          depends=('glibc')
+          provides=('rind')
+          source=()
+          package() {
+            cp -r \$srcdir/* "\$pkgdir"
+          }
+          EOF
 
           chmod -R a+rw /build
           useradd -m builder
@@ -165,7 +164,6 @@ EOF
 
           mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
           repo-add /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
-SCRIPT
 
       - uses: actions/upload-artifact@v4
         with:
@@ -221,7 +219,6 @@ SCRIPT
           done
 
           xbps-rindex -a /void/*/*.xbps
-SCRIPT
 
       - uses: actions/upload-artifact@v4
         with:
@@ -241,7 +238,7 @@ SCRIPT
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-repo'
+          pattern: "*-repo"
           path: /tmp/repos
 
       - name: Combine repos
