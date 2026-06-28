@@ -213,7 +213,7 @@ jobs:
 
             chmod -R a+rw "$work"
             useradd -m builder-${name} 2>/dev/null || true
-            chown -R builder:builder "$work"
+            chown -R "builder-${name}:builder-${name}" "$work"
             cd "$work"
             sudo -u builder env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --nosign
 
