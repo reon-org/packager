@@ -245,8 +245,8 @@ jobs:
 
       - name: Combine repos
         run: |
-          mkdir -p /tmp/pages
-          cp -r /tmp/repos/arch-repo/arch /tmp/pages/arch
+          mkdir -p /tmp/pages/arch /tmp/pages/void
+          cp -r /tmp/repos/arch-repo/* /tmp/pages/arch/
           cp -r /tmp/repos/void-repo/* /tmp/pages/void/
           ls -laR /tmp/pages
 
@@ -303,7 +303,7 @@ jobs:
           for asset in /tmp/artifacts/rind-*-unknown-linux-gnu/*.tar.gz; do
             gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
           done
-          for asset in /tmp/artifacts/arch-repo/arch/os/*/rind-*.pkg.tar.zst; do
+          for asset in /tmp/artifacts/arch-repo/os/*/rind-*.pkg.tar.zst; do
             gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
           done
           for asset in /tmp/artifacts/void-repo/*/rind-*.xbps; do
