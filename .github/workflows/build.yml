@@ -129,9 +129,9 @@ jobs:
           pacman-key --populate archlinux
           pacman -Syu --noconfirm base-devel sudo zstd
           PKGVER="${VER}-${REL}"
-          mkdir -p /build/srcdir /build/pkgdest
+          mkdir -p /build/src /build/pkgdest
           cd /build
-          tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C srcdir
+          tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C src
           {
             echo "pkgname=rind"
             echo "pkgver=$VER"
