@@ -119,6 +119,8 @@ jobs:
 
       - name: Determine tag
         id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
             TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
@@ -132,7 +134,7 @@ jobs:
       - name: Create release
         if: steps.tag.outputs.create == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release create '${{ steps.tag.outputs.tag }}' \
             --title '${{ steps.tag.outputs.tag }}' \
@@ -141,7 +143,7 @@ jobs:
 
       - name: Upload assets
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           for asset in /tmp/artifacts/*/*.tar.gz; do
             gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
