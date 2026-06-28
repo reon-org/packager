@@ -1,0 +1,148 @@
+name: Build and package Rind
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+env:
+  RIND_REPO: https://codeberg.org/bushyice/rind.git
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+    steps:
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install aarch64 glibc cross-toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install cargo-zigbuild (aarch64 musl)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo install cargo-zigbuild
+
+      - name: Clone rind source
+        run: git clone --depth 1 ${{ env.RIND_REPO }} /tmp/rind
+
+      - name: Build
+        run: |
+          cd /tmp/rind
+          case '${{ matrix.target }}' in
+            aarch64-unknown-linux-musl)
+              cargo zigbuild --workspace --release --target ${{ matrix.target }}
+              ;;
+            aarch64-unknown-linux-gnu)
+              CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+              cargo build --workspace --release --target ${{ matrix.target }}
+              ;;
+            *)
+              cargo build --workspace --release --target ${{ matrix.target }}
+              ;;
+          esac
+
+      - name: Package
+        run: |
+          TARGET=${{ matrix.target }}
+          PKG=/tmp/pkg
+          DEPS=/tmp/rind/target/$TARGET/release/deps
+
+          mkdir -p $PKG/usr/bin
+          mkdir -p $PKG/sbin
+          mkdir -p $PKG/usr/lib/rind/plugins
+          mkdir -p $PKG/usr/include
+          mkdir -p $PKG/usr/lib/units
+          mkdir -p $PKG/usr/lib/hooks
+          mkdir -p $PKG/opt/rind/sdk/stubs
+
+          cp /tmp/rind/target/$TARGET/release/rind $PKG/usr/bin/rind
+
+          # applet symlinks
+          for applet in run0 sysunit syssess syslogs sysinvoke sysperms; do
+            ln -s rind $PKG/usr/bin/$applet
+          done
+
+          cp /tmp/rind/target/$TARGET/release/init $PKG/sbin/init
+
+          cp /tmp/rind/target/$TARGET/release/librind_api_sys.so $PKG/usr/lib/librind_api.so
+
+          cp /tmp/rind/crates/api-sys/examples/rind.h $PKG/usr/include/rind.h
+
+          cp /tmp/rind/target/$TARGET/release/libtty_plugin.so $PKG/usr/lib/rind/plugins/libtty_plugin.so
+          # rename networking to .so.0 so it's disabled by default
+          cp /tmp/rind/target/$TARGET/release/libnetworking.so $PKG/usr/lib/rind/plugins/libnetworking.so.0
+
+          cp -r /tmp/rind/crates $PKG/opt/rind/sdk/
+          cp /tmp/rind/Cargo.toml $PKG/opt/rind/sdk/
+          cp /tmp/rind/Cargo.lock $PKG/opt/rind/sdk/
+
+          # rlibs
+          for lib in librind_api librind_api_sys librind_cfg librind_common librind_core librind_flow librind_ipc librind_macros librind_plugins librind_primitives librind_services; do
+            cp "$DEPS/${lib}"*.rmeta "$PKG/opt/rind/sdk/stubs/" 2>/dev/null || true
+            cp "$DEPS/${lib}"*.rlib  "$PKG/opt/rind/sdk/stubs/" 2>/dev/null || true
+            cp "$DEPS/${lib}"*.d     "$PKG/opt/rind/sdk/stubs/" 2>/dev/null || true
+          done
+
+          tar czf /tmp/rind-$TARGET.tar.gz -C $PKG .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rind-${{ matrix.target }}
+          path: /tmp/rind-${{ matrix.target }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/artifacts
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+            echo "tag=${TAG:-rolling}" >> $GITHUB_OUTPUT
+            echo "create=$([[ -z "$TAG" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "create=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create release
+        if: steps.tag.outputs.create == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create '${{ steps.tag.outputs.tag }}' \
+            --title '${{ steps.tag.outputs.tag }}' \
+            --notes 'Rind packaged release ${{ steps.tag.outputs.tag }}' \
+            || true
+
+      - name: Upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for asset in /tmp/artifacts/*/*.tar.gz; do
+            gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
+          done
