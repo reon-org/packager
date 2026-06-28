@@ -3,11 +3,11 @@ name: Build and package Rind
 on:
   push:
     tags:
-      - "*"
+      - '*'
   workflow_dispatch:
 
 env:
-  RIND_REPO: https://codeberg.org/reon/rind.git
+  RIND_REPO: https://codeberg.org/bushyice/rind.git
 
 jobs:
   version:
@@ -128,42 +128,43 @@ jobs:
             -v /tmp/artifacts:/artifacts:ro \
             -v /tmp/arch:/arch:rw \
             archlinux:latest \
-            bash -e << 'SCRIPT'
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Syu --noconfirm base-devel sudo zstd
+            bash -c '
+            set -e
+            pacman-key --init
+            pacman-key --populate archlinux
+            pacman -Syu --noconfirm base-devel sudo zstd
 
-          PKGVER="${VER}-${REL}"
+            PKGVER="${VER}-${REL}"
 
-          mkdir -p /build/srcdir /build/pkgdest
-          cd /build
-          tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C srcdir
+            mkdir -p /build/srcdir /build/pkgdest
+            cd /build
+            tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C srcdir
 
-          cat > PKGBUILD << EOF
-          pkgname=rind
-          pkgver=$VER
-          pkgrel=$REL
-          pkgdesc='An experimental state-based init system'
-          arch=('x86_64')
-          url='https://codeberg.org/bushyice/rind'
-          license=('MPL-2.0')
-          depends=('glibc')
-          provides=('rind')
-          source=()
-          package() {
-            cp -r \$srcdir/* "\$pkgdir"
-          }
-          EOF
+            cat > PKGBUILD << EOF
+            pkgname=rind
+            pkgver=$VER
+            pkgrel=$REL
+            pkgdesc="An experimental state-based init system"
+            arch=("x86_64")
+            url="https://codeberg.org/bushyice/rind"
+            license=("MPL-2.0")
+            depends=("glibc")
+            source=()
+            package() {
+              cp -r \$srcdir/* "\$pkgdir"
+            }
+            EOF
 
-          chmod -R a+rw /build
-          useradd -m builder
-          chown -R builder:builder /build
+            chmod -R a+rw /build
+            useradd -m builder
+            chown -R builder:builder /build
 
-          cd /build
-          sudo -u builder PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --nosign
+            cd /build
+            sudo -u builder PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --nosign
 
-          mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
-          repo-add /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
+            mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
+            repo-add /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
+            '
 
       - uses: actions/upload-artifact@v4
         with:
@@ -192,33 +193,35 @@ jobs:
             -v /tmp/artifacts:/artifacts:ro \
             -v /tmp/void:/void:rw \
             voidlinux/voidlinux:latest \
-            bash -e << 'SCRIPT'
-          xbps-install -Syu --yes xbps
+            sh -c '
+            set -e
+            xbps-install -Syu --yes
 
-          for arch in x86_64 aarch64; do
-            target="${arch}-unknown-linux-gnu"
-            pkgdir="/build/${target}"
+            for arch in x86_64 aarch64; do
+              target="${arch}-unknown-linux-gnu"
+              pkgdir="/build/${target}"
 
-            rm -rf /build
-            mkdir -p "$pkgdir"
-            tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
+              rm -rf /build
+              mkdir -p "$pkgdir"
+              tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
 
-            cd /build
-            xbps-create \
-              -A "${arch}" \
-              -n "rind-${VER}_${REL}" \
-              -s "An experimental state-based init system" \
-              --homepage "https://codeberg.org/bushyice/rind" \
-              --license "MPL-2.0" \
-              --dependencies "glibc" \
-              "$pkgdir"
+              cd /build
+              xbps-create \
+                -A "${arch}" \
+                -n "rind-${VER}_${REL}" \
+                -s "An experimental state-based init system" \
+                --homepage "https://codeberg.org/bushyice/rind" \
+                --license "MPL-2.0" \
+                --dependencies "glibc" \
+                "$pkgdir"
 
-            pkgfile="rind-${VER}_${REL}.${arch}.xbps"
-            mkdir -p "/void/${arch}"
-            mv "$pkgfile" "/void/${arch}/"
-          done
+              pkgfile="rind-${VER}_${REL}.${arch}.xbps"
+              mkdir -p "/void/${arch}"
+              mv "$pkgfile" "/void/${arch}/"
+            done
 
-          xbps-rindex -a /void/*/*.xbps
+            xbps-rindex -a /void/*/*.xbps
+            '
 
       - uses: actions/upload-artifact@v4
         with:
@@ -238,7 +241,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: "*-repo"
+          pattern: '*-repo'
           path: /tmp/repos
 
       - name: Combine repos
