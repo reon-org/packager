@@ -103,6 +103,10 @@ jobs:
           name: rind-x86_64-unknown-linux-gnu
           path: /tmp/rind-artifact
 
+      - uses: actions/checkout@v4
+        with:
+          path: /tmp/packager
+
       - name: Clone rind source (for git log)
         run: git clone ${{ env.RIND_REPO }} /tmp/rind-src
 
@@ -132,9 +136,11 @@ jobs:
       - name: Save version info
         run: |
           mkdir -p /tmp/version-info
-          for k in ver rel tag semver create_release; do
-            printf '%s\n' "${{ steps.v.outputs[k] }}" > "/tmp/version-info/$k"
-          done
+          echo "${{ steps.v.outputs.ver }}" > /tmp/version-info/ver
+          echo "${{ steps.v.outputs.rel }}" > /tmp/version-info/rel
+          echo "${{ steps.v.outputs.tag }}" > /tmp/version-info/tag
+          echo "${{ steps.v.outputs.semver }}" > /tmp/version-info/semver
+          echo "${{ steps.v.outputs.create_release }}" > /tmp/version-info/create_release
 
       - uses: actions/upload-artifact@v4
         with:
@@ -155,7 +161,7 @@ jobs:
             if [ "$PREV" = "$CUR_HASH" ]; then
               echo 'No changes since last release' > /tmp/release-notes.md
             else
-              echo 'aW1wb3J0IHJlLCBzdWJwcm9jZXNzLCBzeXMKCnByZXYsIGN1ciA9IHN5cy5hcmd2WzFdLCBzeXMuYXJndlsyXQpsb2cgPSBzdWJwcm9jZXNzLnJ1bihbJ2dpdCcsICdsb2cnLCAnLS1vbmVsaW5lJywgZid7cHJldn0uLntjdXJ9J10sCiAgICAgICAgICAgICAgICAgICAgIGNhcHR1cmVfb3V0cHV0PVRydWUsIHRleHQ9VHJ1ZSkuc3Rkb3V0CmxpbmVzID0gW2wuc3RyaXAoKSBmb3IgbCBpbiBsb2cuc3RyaXAoKS5zcGxpdCgnXG4nKSBpZiBsLnN0cmlwKCldCgphZGRlZCA9IHt9CnJlbW92ZWQgPSBbXQptb2RpZmllZCA9IFtdCndpcHMgPSB7fQoKZm9yIGxpbmUgaW4gbGluZXM6CiAgICBwYXJ0cyA9IGxpbmUuc3BsaXQoJyAnLCAxKQogICAgaWYgbGVuKHBhcnRzKSA8IDI6CiAgICAgICAgY29udGludWUKICAgIG1zZyA9IHBhcnRzWzFdCiAgICBtc2cgPSByZS5zdWIocichXFMrJywgJycsIG1zZykuc3RyaXAoKQoKICAgIG0gPSByZS5tYXRjaChyJ1wrKD9QPG5hbWU+XHcrKSg/OnsoP1A8c3Vicz5bXn1dKyl9KT8oPzo6d2lwPCg/UDx3aXA+W14+XSspPik/JCcsIG1zZykKICAgIGlmIG06CiAgICAgICAgbmFtZSA9IG0uZ3JvdXAoJ25hbWUnKQogICAgICAgIHN1YnMgPSBtLmdyb3VwKCdzdWJzJykKICAgICAgICB3aXB2ID0gbS5ncm91cCgnd2lwJykKICAgICAgICBpZiB3aXB2OgogICAgICAgICAgICB3aXBzW25hbWVdID0gd2lwdgogICAgICAgIGVsaWYgc3ViczoKICAgICAgICAgICAgYWRkZWRbbmFtZV0gPSBzdWJzLnNwbGl0KCcsJykKICAgICAgICBlbHNlOgogICAgICAgICAgICBhZGRlZC5zZXRkZWZhdWx0KG5hbWUsIFtdKQogICAgICAgIGNvbnRpbnVlCgogICAgbSA9IHJlLm1hdGNoKHInXC0oP1A8bmFtZT5cdyspJywgbXNnKQogICAgaWYgbToKICAgICAgICByZW1vdmVkLmFwcGVuZChtLmdyb3VwKCduYW1lJykpCiAgICAgICAgY29udGludWUKCiAgICBtID0gcmUubWF0Y2gocid+KD9QPG5hbWU+XHcrKScsIG1zZykKICAgIGlmIG06CiAgICAgICAgbW9kaWZpZWQuYXBwZW5kKG0uZ3JvdXAoJ25hbWUnKSkKICAgICAgICBjb250aW51ZQoKb3V0ID0gW10KaWYgYWRkZWQ6CiAgICBvdXQuYXBwZW5kKCcjIyMgQWRkZWQnKQogICAgZm9yIG5hbWUsIHN1YnMgaW4gc29ydGVkKGFkZGVkLml0ZW1zKCkpOgogICAgICAgIGlmIHN1YnM6CiAgICAgICAgICAgIG91dC5hcHBlbmQoZicgIC0ge25hbWV9OiB7IiwgIi5qb2luKHN1YnMpfScpCiAgICAgICAgZWxzZToKICAgICAgICAgICAgb3V0LmFwcGVuZChmJyAgLSB7bmFtZX0nKQppZiByZW1vdmVkOgogICAgaWYgbm90IG91dDoKICAgICAgICBvdXQuYXBwZW5kKCcjIyMgUmVtb3ZlZCcpCiAgICBmb3IgbmFtZSBpbiBzb3J0ZWQocmVtb3ZlZCk6CiAgICAgICAgb3V0LmFwcGVuZChmJyAgLSB7bmFtZX0nKQppZiBtb2RpZmllZDoKICAgIG91dC5hcHBlbmQoJycpCiAgICBvdXQuYXBwZW5kKCcjIyMgTW9kaWZpZWQnKQogICAgZm9yIG5hbWUgaW4gc29ydGVkKG1vZGlmaWVkKToKICAgICAgICBvdXQuYXBwZW5kKGYnICAtIHtuYW1lfScpCmlmIHdpcHM6CiAgICBvdXQuYXBwZW5kKCcnKQogICAgb3V0LmFwcGVuZCgnIyMjIFdvcmsgaW4gUHJvZ3Jlc3MnKQogICAgZm9yIG5hbWUsIHZlciBpbiBzb3J0ZWQod2lwcy5pdGVtcygpKToKICAgICAgICBvdXQuYXBwZW5kKGYnICAtIHtuYW1lfSAoV0lQLCB2e3Zlcn0pJykKaWYgbm90IG91dDoKICAgIG91dC5hcHBlbmQoJ01pc2NlbGxhbmVvdXMgY2hhbmdlcycpCnByaW50KCdcbicuam9pbihvdXQpKQo=' | base64 -d | python3 - "$PREV" "$CUR_HASH" > /tmp/release-notes.md
+              python3 /tmp/packager/.github/scripts/gen-notes.py "$PREV" "$CUR_HASH" > /tmp/release-notes.md
             fi
           fi
 
