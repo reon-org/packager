@@ -176,6 +176,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
@@ -204,4 +206,9 @@ jobs:
         run: |
           for asset in /tmp/artifacts/rind-*-unknown-linux-gnu/*.tar.gz; do
             gh release upload '${{ needs.version.outputs.tag }}' "$asset" --clobber
+          done
+          for comp in components/*/; do
+            name=$(basename "$comp")
+            tar czf "/tmp/rind-units-${name}.tar.gz" -C components "$name"
+            gh release upload '${{ needs.version.outputs.tag }}' "/tmp/rind-units-${name}.tar.gz" --clobber
           done
