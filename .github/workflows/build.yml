@@ -118,6 +118,13 @@ jobs:
           pattern: rind-x86_64-unknown-linux-gnu
           path: /tmp/artifacts
 
+      - name: Generate GPG signing key
+        run: |
+          mkdir -p /tmp/arch-keys
+          gpg --batch --passphrase '' --quick-gen-key "Rind CI <rind@ci>" 2>/dev/null || true
+          gpg --export --armor > /tmp/arch-keys/pub.asc
+          gpg --export-secret-keys --armor > /tmp/arch-keys/priv.asc
+
       - name: Create Arch package (rind)
         run: |
           VER=${{ needs.version.outputs.ver }}
@@ -129,7 +136,13 @@ jobs:
           set -e
           pacman-key --init
           pacman-key --populate archlinux
-          pacman -Syu --noconfirm base-devel sudo zstd
+          pacman -Syu --noconfirm base-devel sudo zstd haveged
+          haveged -w 1024 || true
+
+          gpg --batch --import /keys/priv.asc
+          echo "allow-loopback-pinentry" >> /etc/gnupg/gpg-agent.conf
+          gpgconf --reload gpg-agent
+
           PKGVER="${VER}-${REL}"
           mkdir -p /build/src /build/pkgdest
           cd /build
@@ -152,9 +165,10 @@ jobs:
           useradd -m builder
           chown -R builder:builder /build
           cd /build
-          sudo -u builder env PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --nosign
+          sudo -u builder env PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --sign
           mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
-          repo-add /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
+          mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst.sig /arch/os/x86_64/ 2>/dev/null || true
+          repo-add --sign /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
           SCRIPT91
 
           chmod +x /tmp/build-arch.sh
@@ -164,6 +178,7 @@ jobs:
             -e REL="$REL" \
             -v /tmp/artifacts:/artifacts:ro \
             -v /tmp/arch:/arch:rw \
+            -v /tmp/arch-keys:/keys:ro \
             -v /tmp/build-arch.sh:/build-arch.sh:ro \
             archlinux:latest \
             /bin/bash /build-arch.sh
@@ -185,7 +200,12 @@ jobs:
           set -e
           pacman-key --init
           pacman-key --populate archlinux
-          pacman -Syu --noconfirm base-devel sudo zstd
+          pacman -Syu --noconfirm base-devel sudo zstd haveged
+          haveged -w 1024 || true
+
+          gpg --batch --import /keys/priv.asc
+          echo "allow-loopback-pinentry" >> /etc/gnupg/gpg-agent.conf
+          gpgconf --reload gpg-agent
 
           PKGVER="${VER}-${REL}"
 
@@ -215,10 +235,11 @@ jobs:
             useradd -m builder-${name} 2>/dev/null || true
             chown -R "builder-${name}:builder-${name}" "$work"
             cd "$work"
-            sudo -u "builder-${name}" env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --nosign
+            sudo -u "builder-${name}" env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --sign
 
             cp "$work/pkgdest/rind-units-${name}-${PKGVER}-any.pkg.tar.zst" /arch/os/x86_64/
-            repo-add /arch/os/x86_64/rind.db.tar.zst "/arch/os/x86_64/rind-units-${name}-${PKGVER}-any.pkg.tar.zst"
+            cp "$work/pkgdest/rind-units-${name}-${PKGVER}-any.pkg.tar.zst.sig" /arch/os/x86_64/ 2>/dev/null || true
+            repo-add --sign /arch/os/x86_64/rind.db.tar.zst "/arch/os/x86_64/rind-units-${name}-${PKGVER}-any.pkg.tar.zst"
           done
           SCRIPTCP
 
@@ -230,9 +251,14 @@ jobs:
             -e COMP_NAMES="$COMP_NAMES" \
             -v "$(pwd)/components:/components:ro" \
             -v /tmp/arch:/arch:rw \
+            -v /tmp/arch-keys:/keys:ro \
             -v /tmp/build-comps.sh:/build-comps.sh:ro \
             archlinux:latest \
             /bin/bash /build-comps.sh
+
+      - name: Export public key
+        run: |
+          cp /tmp/arch-keys/pub.asc /tmp/arch/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -251,6 +277,11 @@ jobs:
           pattern: rind-*-unknown-linux-gnu
           path: /tmp/artifacts
 
+      - name: Generate Void signing key
+        run: |
+          openssl genrsa -out /tmp/void-key.pem 2048
+          openssl rsa -in /tmp/void-key.pem -pubout -out /tmp/void-key.pub
+
       - name: Create Void packages and repo
         run: |
           VER=${{ needs.version.outputs.ver }}
@@ -268,6 +299,7 @@ jobs:
             -e COMP_NAMES="$COMP_NAMES" \
             -v /tmp/artifacts:/artifacts:ro \
             -v /tmp/void:/void:rw \
+            -v /tmp/void-key.pem:/void-key.pem:ro \
             -v "$(pwd)/components:/components:ro" \
             voidlinux/voidlinux:latest \
             sh -c '
@@ -312,6 +344,7 @@ jobs:
             done
 
             xbps-rindex -a *.xbps
+            xbps-rindex --sign --privkey /void-key.pem .
 
             if [ -d repodata ]; then
               mv repodata/* /void/
@@ -329,6 +362,10 @@ jobs:
 
             rmdir /void/stage
             '
+
+      - name: Export public key
+        run: |
+          cp /tmp/void-key.pub /tmp/void/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -356,6 +393,8 @@ jobs:
           mkdir -p /tmp/pages/arch /tmp/pages/void
           cp -r /tmp/repos/arch-repo/* /tmp/pages/arch/
           cp -r /tmp/repos/void-repo/* /tmp/pages/void/
+          cp /tmp/repos/arch-repo/pub.asc /tmp/pages/rind-gpg-public.asc 2>/dev/null || true
+          cp /tmp/repos/void-repo/void-key.pub /tmp/pages/ 2>/dev/null || true
           ls -laR /tmp/pages
 
       - name: Upload Pages artifact
