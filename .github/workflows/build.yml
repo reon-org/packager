@@ -315,7 +315,7 @@ jobs:
             sh -c '
             set -e
 
-            mkdir -p /void/stage /void/x86_64 /void/aarch64 /void/noarch
+            mkdir -p /void/stage
             cd /void/stage
 
             for arch in x86_64 aarch64; do
@@ -325,7 +325,6 @@ jobs:
               mkdir -p "$pkgdir"
               tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
 
-              pkgfile="rind-${VER}_${REL}.${arch}.xbps"
               xbps-create \
                 -A "${arch}" \
                 -n "rind-${VER}_${REL}" \
@@ -333,8 +332,6 @@ jobs:
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
                 "$pkgdir"
-
-              mv "$pkgfile" "/void/${arch}/"
             done
 
             for name in $COMP_NAMES; do
@@ -346,7 +343,6 @@ jobs:
               [ -d "$src/units" ] && cp -r "$src/units/"* "$staging/usr/lib/rind/units/"
               [ -d "$src/hooks" ] && cp -r "$src/hooks/"* "$staging/usr/lib/rind/hooks/"
 
-              pkgfile="rind-units-${name}-${VER}_${REL}.noarch.xbps"
               xbps-create \
                 -A noarch \
                 -n "rind-units-${name}-${VER}_${REL}" \
@@ -354,21 +350,17 @@ jobs:
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
                 "$staging"
-
-              mv "$pkgfile" "/void/noarch/"
             done
 
-            cd /void
-            xbps-rindex -a x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
-            xbps-rindex --sign-pkg --privkey /void-key.pem x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
+            xbps-rindex -a *.xbps
+            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
 
-            find /void -name '*-repodata' -exec mv {} /void/ \; 2>/dev/null || true
+            ls -la /void/stage/
+            find /void/stage -type f | head -20
+
+            mv /void/stage/* /void/
+            rmdir /void/stage
             ls -la /void/
-            ls -la /void/x86_64/ 2>/dev/null || true
-            ls -la /void/aarch64/ 2>/dev/null || true
-            ls -la /void/noarch/ 2>/dev/null || true
-
-            rm -rf /void/stage
             '
 
       - name: Export public key
