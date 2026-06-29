@@ -315,9 +315,7 @@ jobs:
             sh -c '
             set -e
 
-            rm -rf /void/stage
-            mkdir -p /void/stage
-            cd /void/stage
+            mkdir -p /void/x86_64 /void/aarch64 /void/noarch
 
             for arch in x86_64 aarch64; do
               target="${arch}-unknown-linux-gnu"
@@ -326,12 +324,14 @@ jobs:
               mkdir -p "$pkgdir"
               tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
 
+              pkgfile="rind-${VER}_${REL}.${arch}.xbps"
               xbps-create \
                 -A "${arch}" \
                 -n "rind-${VER}_${REL}" \
                 -s "An experimental state-based init system" \
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
+                -o "/void/${arch}/${pkgfile}" \
                 "$pkgdir"
             done
 
@@ -344,35 +344,22 @@ jobs:
               [ -d "$src/units" ] && cp -r "$src/units/"* "$staging/usr/lib/rind/units/"
               [ -d "$src/hooks" ] && cp -r "$src/hooks/"* "$staging/usr/lib/rind/hooks/"
 
+              pkgfile="rind-units-${name}-${VER}_${REL}.noarch.xbps"
               xbps-create \
                 -A noarch \
                 -n "rind-units-${name}-${VER}_${REL}" \
                 -s "Rind units and hooks -- ${name}" \
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
+                -o "/void/noarch/${pkgfile}" \
                 "$staging"
             done
 
-            xbps-rindex -a *.xbps
-            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
+            cd /void
+            xbps-rindex -a x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
+            xbps-rindex --sign-pkg --privkey /void-key.pem x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
             xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
-            if [ -d repodata ]; then
-              mv repodata/* /void/
-            fi
-            mv *-repodata /void/ 2>/dev/null || true
-            ls -la /void/
-
-            for f in *.xbps *.sig; do
-              [ -f "$f" ] || continue
-              case "$f" in
-                *.x86_64.xbps|*.x86_64.xbps.sig) mkdir -p /void/x86_64; mv "$f" /void/x86_64/ ;;
-                *.aarch64.xbps|*.aarch64.xbps.sig) mkdir -p /void/aarch64; mv "$f" /void/aarch64/ ;;
-                *.noarch.xbps|*.noarch.xbps.sig) mkdir -p /void/noarch; mv "$f" /void/noarch/ ;;
-              esac
-            done
-
-            rmdir /void/stage
             '
 
       - name: Export public key
