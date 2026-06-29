@@ -339,7 +339,7 @@ jobs:
 
             cd /void
             xbps-rindex -a -f *.xbps
-            xbps-rindex --sign --signedby "Rind CI" --privkey /void-key.pem *.xbps 2>/dev/null || echo "no-sign"
+            xbps-rindex --sign --signedby "Rind CI" --privkey /void-key.pem
             xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
             for f in *.xbps.sig; do cp "$f" "${f%.sig}.sig2"; done
             # openssl dgst -sha256 -sign /void-key.pem -out x86_64-repodata.sig x86_64-repodata
