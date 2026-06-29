@@ -95,12 +95,12 @@ jobs:
           name: build-outputs
           path: /tmp/artifacts
 
-      - name: Generate GPG signing key
+      - name: Import GPG signing key
         run: |
           mkdir -p /tmp/arch-keys
-          gpg --batch --passphrase '' --quick-gen-key "Rind CI <rind@ci>" 2>/dev/null || true
+          echo '${{ secrets.ARCH_SIGNING_KEY }}' > /tmp/arch-keys/priv.asc
+          gpg --batch --import /tmp/arch-keys/priv.asc
           gpg --export --armor > /tmp/arch-keys/pub.asc
-          gpg --export-secret-keys --armor > /tmp/arch-keys/priv.asc
 
       - name: Create Arch package (rind)
         run: |
