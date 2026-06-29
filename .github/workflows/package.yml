@@ -338,9 +338,7 @@ jobs:
             done
 
             cd /void
-            xbps-rindex -a *.xbps
-            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
-            openssl dgst -sha256 -sign /void-key.pem -out x86_64-repodata.sig x86_64-repodata
+            xbps-rindex -a -s /void-key.pem *.xbps
             '
 
       - name: Export public key and index.html
