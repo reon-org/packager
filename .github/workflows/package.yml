@@ -8,9 +8,27 @@ on:
   workflow_dispatch:
   
 jobs:
-  version:
+  build-run:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      run-id: ${{ steps.r.outputs.run-id }}
+    steps:
+      - id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ '${{ github.event_name }}' == 'workflow_run' ]]; then
+            echo "run-id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
+          else
+            ID=$(gh run list --workflow "Build Rind" --status success --limit 1 \
+                 --json databaseId --jq '.[0].databaseId')
+            echo "run-id=$ID" >> $GITHUB_OUTPUT
+          fi
+
+  version:
+    needs: [build-run]
+    runs-on: ubuntu-latest
     outputs:
       ver: ${{ steps.v.outputs.ver }}
       rel: ${{ steps.v.outputs.rel }}
@@ -19,7 +37,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: version-info
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ needs.build-run.outputs.run-id }}
           github-token: ${{ github.token }}
           path: /tmp/version-info
 
@@ -31,7 +49,7 @@ jobs:
 
   arch-repo:
     name: Arch Linux package
-    needs: [version]
+    needs: [version, build-run]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +58,7 @@ jobs:
         with:
           pattern: rind-x86_64-unknown-linux-gnu
           path: /tmp/artifacts
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ needs.build-run.outputs.run-id }}
           github-token: ${{ github.token }}
 
       - name: Generate GPG signing key
@@ -208,7 +226,7 @@ jobs:
 
   void-repo:
     name: Void Linux package
-    needs: [version]
+    needs: [version, build-run]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,7 +235,7 @@ jobs:
         with:
           pattern: rind-*-unknown-linux-gnu
           path: /tmp/artifacts
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ needs.build-run.outputs.run-id }}
           github-token: ${{ github.token }}
 
       - name: Generate Void signing key
@@ -248,14 +266,12 @@ jobs:
             sh -c '
             set -e
 
-            mkdir -p /void/stage
-            cd /void/stage
-
             for arch in x86_64 aarch64; do
               target="${arch}-unknown-linux-gnu"
-              rm -rf /build
               pkgdir="/build/rind-${target}"
+              rm -rf "$pkgdir"
               mkdir -p "$pkgdir"
+
               tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
 
               xbps-create \
@@ -265,11 +281,13 @@ jobs:
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
                 "$pkgdir"
+
+              mv "rind-${VER}_${REL}.${arch}.xbps" /void/
             done
 
             for name in $COMP_NAMES; do
-              rm -rf /build
               staging="/build/${name}"
+              rm -rf "$staging"
               mkdir -p "$staging/usr/lib/rind/units" "$staging/usr/lib/rind/hooks"
 
               src="/components/${name}"
@@ -283,15 +301,14 @@ jobs:
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
                 "$staging"
+
+              mv "rind-units-${name}-${VER}_${REL}.noarch.xbps" /void/
             done
 
+            cd /void
             xbps-rindex -a *.xbps
-            xbps-rindex --sign --signedby "Rind CI" --privkey /void-key.pem .
-
             xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
-
-            mv /void/stage/* /void/
-            rmdir /void/stage
+            openssl dgst -sha256 -sign /void-key.pem -out x86_64-repodata.sig x86_64-repodata
             '
 
       - name: Export public key and index.html
