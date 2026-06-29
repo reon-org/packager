@@ -155,77 +155,7 @@ jobs:
             if [ "$PREV" = "$CUR_HASH" ]; then
               echo 'No changes since last release' > /tmp/release-notes.md
             else
-              python3 << 'PYEOF' > /tmp/release-notes.md
-import re, subprocess
-
-prev = '$PREV'
-cur = '$CUR_HASH'
-log = subprocess.run(['git', 'log', '--oneline', f'{prev}..{cur}'],
-                     capture_output=True, text=True).stdout
-lines = [l.strip() for l in log.strip().split('\n') if l.strip()]
-
-added = {}
-removed = []
-modified = []
-wips = {}
-
-for line in lines:
-    parts = line.split(' ', 1)
-    if len(parts) < 2:
-        continue
-    msg = parts[1]
-    msg = re.sub(r'!\S+', '', msg).strip()
-
-    m = re.match(r'\+(?P<name>\w+)(?:{(?P<subs>[^}]+)})?(?::wip<(?P<wip>[^>]+)>)?$', msg)
-    if m:
-        name = m.group('name')
-        subs = m.group('subs')
-        wipv = m.group('wip')
-        if wipv:
-            wips[name] = wipv
-        elif subs:
-            added[name] = subs.split(',')
-        else:
-            added.setdefault(name, [])
-        continue
-
-    m = re.match(r'\-(?P<name>\w+)', msg)
-    if m:
-        removed.append(m.group('name'))
-        continue
-
-    m = re.match(r'~(?P<name>\w+)', msg)
-    if m:
-        modified.append(m.group('name'))
-        continue
-
-out = []
-if added:
-    out.append('### Added')
-    for name, subs in sorted(added.items()):
-        if subs:
-            out.append(f'  - {name}: {", ".join(subs)}')
-        else:
-            out.append(f'  - {name}')
-if removed:
-    if not out:
-        out.append('### Removed')
-    for name in sorted(removed):
-        out.append(f'  - {name}')
-if modified:
-    out.append('')
-    out.append('### Modified')
-    for name in sorted(modified):
-        out.append(f'  - {name}')
-if wips:
-    out.append('')
-    out.append('### Work in Progress')
-    for name, ver in sorted(wips.items()):
-        out.append(f'  - {name} (WIP, v{ver})')
-if not out:
-    out.append('Miscellaneous changes')
-print('\n'.join(out))
-PYEOF
+              echo 'aW1wb3J0IHJlLCBzdWJwcm9jZXNzLCBzeXMKCnByZXYsIGN1ciA9IHN5cy5hcmd2WzFdLCBzeXMuYXJndlsyXQpsb2cgPSBzdWJwcm9jZXNzLnJ1bihbJ2dpdCcsICdsb2cnLCAnLS1vbmVsaW5lJywgZid7cHJldn0uLntjdXJ9J10sCiAgICAgICAgICAgICAgICAgICAgIGNhcHR1cmVfb3V0cHV0PVRydWUsIHRleHQ9VHJ1ZSkuc3Rkb3V0CmxpbmVzID0gW2wuc3RyaXAoKSBmb3IgbCBpbiBsb2cuc3RyaXAoKS5zcGxpdCgnXG4nKSBpZiBsLnN0cmlwKCldCgphZGRlZCA9IHt9CnJlbW92ZWQgPSBbXQptb2RpZmllZCA9IFtdCndpcHMgPSB7fQoKZm9yIGxpbmUgaW4gbGluZXM6CiAgICBwYXJ0cyA9IGxpbmUuc3BsaXQoJyAnLCAxKQogICAgaWYgbGVuKHBhcnRzKSA8IDI6CiAgICAgICAgY29udGludWUKICAgIG1zZyA9IHBhcnRzWzFdCiAgICBtc2cgPSByZS5zdWIocichXFMrJywgJycsIG1zZykuc3RyaXAoKQoKICAgIG0gPSByZS5tYXRjaChyJ1wrKD9QPG5hbWU+XHcrKSg/OnsoP1A8c3Vicz5bXn1dKyl9KT8oPzo6d2lwPCg/UDx3aXA+W14+XSspPik/JCcsIG1zZykKICAgIGlmIG06CiAgICAgICAgbmFtZSA9IG0uZ3JvdXAoJ25hbWUnKQogICAgICAgIHN1YnMgPSBtLmdyb3VwKCdzdWJzJykKICAgICAgICB3aXB2ID0gbS5ncm91cCgnd2lwJykKICAgICAgICBpZiB3aXB2OgogICAgICAgICAgICB3aXBzW25hbWVdID0gd2lwdgogICAgICAgIGVsaWYgc3ViczoKICAgICAgICAgICAgYWRkZWRbbmFtZV0gPSBzdWJzLnNwbGl0KCcsJykKICAgICAgICBlbHNlOgogICAgICAgICAgICBhZGRlZC5zZXRkZWZhdWx0KG5hbWUsIFtdKQogICAgICAgIGNvbnRpbnVlCgogICAgbSA9IHJlLm1hdGNoKHInXC0oP1A8bmFtZT5cdyspJywgbXNnKQogICAgaWYgbToKICAgICAgICByZW1vdmVkLmFwcGVuZChtLmdyb3VwKCduYW1lJykpCiAgICAgICAgY29udGludWUKCiAgICBtID0gcmUubWF0Y2gocid+KD9QPG5hbWU+XHcrKScsIG1zZykKICAgIGlmIG06CiAgICAgICAgbW9kaWZpZWQuYXBwZW5kKG0uZ3JvdXAoJ25hbWUnKSkKICAgICAgICBjb250aW51ZQoKb3V0ID0gW10KaWYgYWRkZWQ6CiAgICBvdXQuYXBwZW5kKCcjIyMgQWRkZWQnKQogICAgZm9yIG5hbWUsIHN1YnMgaW4gc29ydGVkKGFkZGVkLml0ZW1zKCkpOgogICAgICAgIGlmIHN1YnM6CiAgICAgICAgICAgIG91dC5hcHBlbmQoZicgIC0ge25hbWV9OiB7IiwgIi5qb2luKHN1YnMpfScpCiAgICAgICAgZWxzZToKICAgICAgICAgICAgb3V0LmFwcGVuZChmJyAgLSB7bmFtZX0nKQppZiByZW1vdmVkOgogICAgaWYgbm90IG91dDoKICAgICAgICBvdXQuYXBwZW5kKCcjIyMgUmVtb3ZlZCcpCiAgICBmb3IgbmFtZSBpbiBzb3J0ZWQocmVtb3ZlZCk6CiAgICAgICAgb3V0LmFwcGVuZChmJyAgLSB7bmFtZX0nKQppZiBtb2RpZmllZDoKICAgIG91dC5hcHBlbmQoJycpCiAgICBvdXQuYXBwZW5kKCcjIyMgTW9kaWZpZWQnKQogICAgZm9yIG5hbWUgaW4gc29ydGVkKG1vZGlmaWVkKToKICAgICAgICBvdXQuYXBwZW5kKGYnICAtIHtuYW1lfScpCmlmIHdpcHM6CiAgICBvdXQuYXBwZW5kKCcnKQogICAgb3V0LmFwcGVuZCgnIyMjIFdvcmsgaW4gUHJvZ3Jlc3MnKQogICAgZm9yIG5hbWUsIHZlciBpbiBzb3J0ZWQod2lwcy5pdGVtcygpKToKICAgICAgICBvdXQuYXBwZW5kKGYnICAtIHtuYW1lfSAoV0lQLCB2e3Zlcn0pJykKaWYgbm90IG91dDoKICAgIG91dC5hcHBlbmQoJ01pc2NlbGxhbmVvdXMgY2hhbmdlcycpCnByaW50KCdcbicuam9pbihvdXQpKQo=' | base64 -d | python3 - "$PREV" "$CUR_HASH" > /tmp/release-notes.md
             fi
           fi
 
