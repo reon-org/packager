@@ -270,9 +270,9 @@ jobs:
           name: build-outputs
           path: /tmp/artifacts
 
-      - name: Generate Void signing key
+      - name: Write signing key
         run: |
-          openssl genrsa -out /tmp/void-key.pem 2048
+          echo '${{ secrets.VOID_SIGNING_KEY }}' > /tmp/void-key.pem
           openssl rsa -in /tmp/void-key.pem -pubout -out /tmp/void-key.pub
 
       - name: Create Void packages and repo
@@ -338,9 +338,10 @@ jobs:
             done
 
             cd /void
-            xbps-rindex -a -f -s /void-key.pem *.xbps
+            xbps-rindex -a -f *.xbps
             xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
             for f in *.xbps.sig; do cp "$f" "${f%.sig}.sig2"; done
+            openssl dgst -sha256 -sign /void-key.pem -out x86_64-repodata.sig x86_64-repodata
             '
 
       - name: Export public key and index.html
