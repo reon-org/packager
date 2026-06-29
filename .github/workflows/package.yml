@@ -338,8 +338,8 @@ jobs:
             done
 
             cd /void
-            xbps-rindex -a *.xbps
-            xbps-rindex --sign --privkey /void-key.pem *.xbps
+            xbps-rindex -a -f *.xbps
+            xbps-rindex --sign --privkey /void-key.pem *.xbps 2>/dev/null || true
             xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
             for f in *.xbps.sig; do cp "$f" "${f%.sig}.sig2"; done
             '
