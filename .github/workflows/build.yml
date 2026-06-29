@@ -290,7 +290,6 @@ jobs:
                 -s "An experimental state-based init system" \
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
-                --dependencies "glibc" \
                 "$pkgdir"
             done
 
