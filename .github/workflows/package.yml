@@ -73,7 +73,11 @@ jobs:
             echo "tag=$(cat /tmp/build/version-info/tag)" >> $GITHUB_OUTPUT
           else
             TAG=${{ needs.build-run.outputs.release-tag }}
-            VER="${TAG#v}"
+            if [[ "$TAG" == rolling ]]; then
+              VER=$(date +%Y.%m.%d)
+            else
+              VER="${TAG#v}"
+            fi
             echo "ver=$VER" >> $GITHUB_OUTPUT
             echo "rel=1" >> $GITHUB_OUTPUT
             echo "tag=$TAG" >> $GITHUB_OUTPUT
