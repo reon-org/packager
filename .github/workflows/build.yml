@@ -273,6 +273,10 @@ jobs:
             sh -c '
             set -e
 
+            rm -rf /void/stage
+            mkdir -p /void/stage
+            cd /void/stage
+
             for arch in x86_64 aarch64; do
               target="${arch}-unknown-linux-gnu"
               rm -rf /build
@@ -280,7 +284,6 @@ jobs:
               mkdir -p "$pkgdir"
               tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
 
-              cd /build
               xbps-create \
                 -A "${arch}" \
                 -n "rind-${VER}_${REL}" \
@@ -289,13 +292,7 @@ jobs:
                 --license "MPL-2.0" \
                 --dependencies "glibc" \
                 "$pkgdir"
-
-              pkgfile="rind-${VER}_${REL}.${arch}.xbps"
-              mkdir -p "/void/${arch}"
-              mv "$pkgfile" "/void/${arch}/"
             done
-
-            mkdir -p /void/noarch
 
             for name in $COMP_NAMES; do
               rm -rf /build
@@ -306,7 +303,6 @@ jobs:
               [ -d "$src/units" ] && cp -r "$src/units/"* "$staging/usr/lib/rind/units/"
               [ -d "$src/hooks" ] && cp -r "$src/hooks/"* "$staging/usr/lib/rind/hooks/"
 
-              cd /build
               xbps-create \
                 -A noarch \
                 -n "rind-units-${name}-${VER}_${REL}" \
@@ -314,11 +310,21 @@ jobs:
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
                 "$staging"
-
-              mv "rind-units-${name}-${VER}_${REL}.noarch.xbps" "/void/noarch/"
             done
 
-            xbps-rindex -a /void/*/*.xbps
+            xbps-rindex -a *.xbps
+
+            mv repodata /void/
+
+            for f in *.xbps; do
+              case "$f" in
+                *.x86_64.xbps) mkdir -p /void/x86_64; mv "$f" /void/x86_64/ ;;
+                *.aarch64.xbps) mkdir -p /void/aarch64; mv "$f" /void/aarch64/ ;;
+                *.noarch.xbps) mkdir -p /void/noarch; mv "$f" /void/noarch/ ;;
+              esac
+            done
+
+            rmdir /void/stage
             '
 
       - uses: actions/upload-artifact@v4
