@@ -164,6 +164,11 @@ jobs:
           chmod -R a+rw /build
           useradd -m builder
           chown -R builder:builder /build
+          sudo -u builder gpg --batch --import /keys/priv.asc
+          mkdir -p /home/builder/.gnupg
+          echo "allow-loopback-pinentry" >> /home/builder/.gnupg/gpg-agent.conf
+          chown -R builder:builder /home/builder/.gnupg
+          sudo -u builder gpgconf --reload gpg-agent
           cd /build
           sudo -u builder env PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --sign
           mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
@@ -234,6 +239,11 @@ jobs:
             chmod -R a+rw "$work"
             useradd -m builder-${name} 2>/dev/null || true
             chown -R "builder-${name}:builder-${name}" "$work"
+            sudo -u "builder-${name}" gpg --batch --import /keys/priv.asc
+            mkdir -p "/home/builder-${name}/.gnupg"
+            echo "allow-loopback-pinentry" >> "/home/builder-${name}/.gnupg/gpg-agent.conf"
+            chown -R "builder-${name}:builder-${name}" "/home/builder-${name}/.gnupg"
+            sudo -u "builder-${name}" gpgconf --reload gpg-agent
             cd "$work"
             sudo -u "builder-${name}" env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --sign
 
