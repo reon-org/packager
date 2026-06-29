@@ -353,7 +353,8 @@ jobs:
                 "$staging"
             done
 
-            xbps-rindex -a --sign-pkg --privkey /void-key.pem *.xbps
+            xbps-rindex -a *.xbps
+            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
             xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
             if [ -d repodata ]; then
