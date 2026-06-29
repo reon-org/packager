@@ -315,7 +315,8 @@ jobs:
             sh -c '
             set -e
 
-            mkdir -p /void/x86_64 /void/aarch64 /void/noarch
+            mkdir -p /void/stage /void/x86_64 /void/aarch64 /void/noarch
+            cd /void/stage
 
             for arch in x86_64 aarch64; do
               target="${arch}-unknown-linux-gnu"
@@ -331,8 +332,9 @@ jobs:
                 -s "An experimental state-based init system" \
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
-                -o "/void/${arch}/${pkgfile}" \
                 "$pkgdir"
+
+              mv "$pkgfile" "/void/${arch}/"
             done
 
             for name in $COMP_NAMES; do
@@ -351,8 +353,9 @@ jobs:
                 -s "Rind units and hooks -- ${name}" \
                 --homepage "https://codeberg.org/bushyice/rind" \
                 --license "MPL-2.0" \
-                -o "/void/noarch/${pkgfile}" \
                 "$staging"
+
+              mv "$pkgfile" "/void/noarch/"
             done
 
             cd /void
@@ -360,7 +363,7 @@ jobs:
             xbps-rindex --sign-pkg --privkey /void-key.pem x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
             xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
-            '
+            rm -rf /void/stage
 
       - name: Export public key
         run: |
