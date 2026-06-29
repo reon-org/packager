@@ -364,6 +364,7 @@ jobs:
             xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
             rm -rf /void/stage
+            '
 
       - name: Export public key
         run: |
