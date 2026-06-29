@@ -140,7 +140,7 @@ jobs:
           haveged -w 1024 || true
 
           gpg --batch --import /keys/priv.asc
-          echo "allow-loopback-pinentry" >> /etc/gnupg/gpg-agent.conf
+          echo "allow-loopback-pinentry" >> /root/.gnupg/gpg-agent.conf
           gpgconf --reload gpg-agent
 
           PKGVER="${VER}-${REL}"
@@ -204,7 +204,7 @@ jobs:
           haveged -w 1024 || true
 
           gpg --batch --import /keys/priv.asc
-          echo "allow-loopback-pinentry" >> /etc/gnupg/gpg-agent.conf
+          echo "allow-loopback-pinentry" >> /root/.gnupg/gpg-agent.conf
           gpgconf --reload gpg-agent
 
           PKGVER="${VER}-${REL}"
@@ -344,7 +344,7 @@ jobs:
             done
 
             xbps-rindex -a *.xbps
-            xbps-rindex --sign --privkey /void-key.pem .
+            xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
             if [ -d repodata ]; then
               mv repodata/* /void/
