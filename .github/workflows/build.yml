@@ -1,4 +1,4 @@
-name: Build and package Rind
+name: Build Rind
 
 on:
   push:
@@ -15,17 +15,41 @@ jobs:
     outputs:
       ver: ${{ steps.v.outputs.ver }}
       rel: ${{ steps.v.outputs.rel }}
+      tag: ${{ steps.v.outputs.tag }}
+      create_release: ${{ steps.v.outputs.create_release }}
     steps:
+      - uses: actions/checkout@v4
+      
       - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ '${{ github.event_name }}' == 'push' && '${{ github.ref_type }}' == 'tag' ]]; then
             TAG=${{ github.ref_name }}
             echo "ver=${TAG#v}" >> $GITHUB_OUTPUT
             echo "rel=1" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "create_release=true" >> $GITHUB_OUTPUT
           else
             echo "ver=$(date +%Y.%m.%d)" >> $GITHUB_OUTPUT
             echo "rel=1" >> $GITHUB_OUTPUT
+            LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+            echo "tag=${LATEST_TAG:-rolling}" >> $GITHUB_OUTPUT
+            echo "create_release=$([[ -z "$LATEST_TAG" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
           fi
+          
+      - name: Save version info
+        run: |
+          mkdir /tmp/version-info
+          echo "${{ steps.v.outputs.ver }}" > /tmp/version-info/ver
+          echo "${{ steps.v.outputs.rel }}" > /tmp/version-info/rel
+          echo "${{ steps.v.outputs.tag }}" > /tmp/version-info/tag
+          echo "${{ steps.v.outputs.create_release }}" > /tmp/version-info/create_release
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: version-info
+          path: /tmp/version-info
 
   build:
     name: ${{ matrix.target }}
@@ -106,309 +130,9 @@ jobs:
           name: rind-${{ matrix.target }}
           path: /tmp/rind-${{ matrix.target }}.tar.gz
 
-  arch-repo:
-    name: Arch Linux package
-    needs: [version, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: rind-x86_64-unknown-linux-gnu
-          path: /tmp/artifacts
-
-      - name: Generate GPG signing key
-        run: |
-          mkdir -p /tmp/arch-keys
-          gpg --batch --passphrase '' --quick-gen-key "Rind CI <rind@ci>" 2>/dev/null || true
-          gpg --export --armor > /tmp/arch-keys/pub.asc
-          gpg --export-secret-keys --armor > /tmp/arch-keys/priv.asc
-
-      - name: Create Arch package (rind)
-        run: |
-          VER=${{ needs.version.outputs.ver }}
-          REL=${{ needs.version.outputs.rel }}
-          mkdir -p /tmp/arch/os/x86_64
-
-          cat > /tmp/build-arch.sh << 'SCRIPT91'
-          #!/bin/bash
-          set -e
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Syu --noconfirm base-devel sudo zstd haveged
-          haveged -w 1024 || true
-
-          gpg --batch --import /keys/priv.asc
-          echo "allow-loopback-pinentry" >> /root/.gnupg/gpg-agent.conf
-          gpgconf --reload gpg-agent
-
-          PKGVER="${VER}-${REL}"
-          mkdir -p /build/src /build/pkgdest
-          cd /build
-          tar xzf /artifacts/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz -C src
-          {
-            echo "pkgname=rind"
-            echo "pkgver=$VER"
-            echo "pkgrel=$REL"
-            echo 'pkgdesc="An experimental state-based init system"'
-            echo 'arch=("x86_64")'
-            echo 'url="https://codeberg.org/bushyice/rind"'
-            echo 'license=("MPL-2.0")'
-            echo 'depends=("glibc")'
-            echo 'source=()'
-            echo 'package() {'
-            echo '  cp -r "$srcdir"/* "$pkgdir"'
-            echo '}'
-          } > PKGBUILD
-          chmod -R a+rw /build
-          useradd -m builder
-          chown -R builder:builder /build
-          sudo -u builder gpg --batch --import /keys/priv.asc
-          mkdir -p /home/builder/.gnupg
-          echo "allow-loopback-pinentry" >> /home/builder/.gnupg/gpg-agent.conf
-          chown -R builder:builder /home/builder/.gnupg
-          sudo -u builder gpgconf --reload gpg-agent
-          cd /build
-          sudo -u builder env PKGDEST=/build/pkgdest makepkg --noextract --nocheck --skipinteg --noprepare --sign
-          mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst /arch/os/x86_64/
-          mv /build/pkgdest/rind-${PKGVER}-x86_64.pkg.tar.zst.sig /arch/os/x86_64/ 2>/dev/null || true
-          repo-add --sign /arch/os/x86_64/rind.db.tar.zst /arch/os/x86_64/rind-${PKGVER}-x86_64.pkg.tar.zst
-          SCRIPT91
-
-          chmod +x /tmp/build-arch.sh
-
-          docker run --rm \
-            -e VER="$VER" \
-            -e REL="$REL" \
-            -v /tmp/artifacts:/artifacts:ro \
-            -v /tmp/arch:/arch:rw \
-            -v /tmp/arch-keys:/keys:ro \
-            -v /tmp/build-arch.sh:/build-arch.sh:ro \
-            archlinux:latest \
-            /bin/bash /build-arch.sh
-
-      - name: Create Arch packages (components)
-        run: |
-          VER=${{ needs.version.outputs.ver }}
-          REL=${{ needs.version.outputs.rel }}
-          PKGVER="${VER}-${REL}"
-
-          COMP_NAMES=""
-          for comp in components/*/; do
-            COMP_NAMES="$COMP_NAMES $(basename "$comp")"
-          done
-          [ -n "$COMP_NAMES" ] || exit 0
-
-          cat > /tmp/build-comps.sh << 'SCRIPTCP'
-          #!/bin/bash
-          set -e
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Syu --noconfirm base-devel sudo zstd haveged
-          haveged -w 1024 || true
-
-          gpg --batch --import /keys/priv.asc
-          echo "allow-loopback-pinentry" >> /root/.gnupg/gpg-agent.conf
-          gpgconf --reload gpg-agent
-
-          PKGVER="${VER}-${REL}"
-
-          for name in $COMP_NAMES; do
-            work="/build/${name}"
-            src="/components/${name}"
-            mkdir -p "$work/src" "$work/pkgdest"
-            cp -r "$src/"* "$work/src/"
-
-            {
-              echo "pkgname=rind-units-${name}"
-              echo "pkgver=$VER"
-              echo "pkgrel=$REL"
-              echo "pkgdesc=Rind units and hooks -- ${name}"
-              echo 'arch=("any")'
-              echo 'url="https://codeberg.org/bushyice/rind"'
-              echo 'license=("MPL-2.0")'
-              echo 'source=()'
-              echo 'package() {'
-              echo '  cd "$srcdir"'
-              echo '  [ -d units ] && install -d "$pkgdir/usr/lib/rind/units" && cp -r units/* "$pkgdir/usr/lib/rind/units/"'
-              echo '  [ -d hooks ] && install -d "$pkgdir/usr/lib/rind/hooks" && cp -r hooks/* "$pkgdir/usr/lib/rind/hooks/"'
-              echo '}'
-            } > "$work/PKGBUILD"
-
-            chmod -R a+rw "$work"
-            useradd -m builder-${name} 2>/dev/null || true
-            chown -R "builder-${name}:builder-${name}" "$work"
-            sudo -u "builder-${name}" gpg --batch --import /keys/priv.asc
-            mkdir -p "/home/builder-${name}/.gnupg"
-            echo "allow-loopback-pinentry" >> "/home/builder-${name}/.gnupg/gpg-agent.conf"
-            chown -R "builder-${name}:builder-${name}" "/home/builder-${name}/.gnupg"
-            sudo -u "builder-${name}" gpgconf --reload gpg-agent
-            cd "$work"
-            sudo -u "builder-${name}" env PKGDEST="$work/pkgdest" makepkg --noextract --nocheck --skipinteg --noprepare --sign
-
-            cp "$work/pkgdest/rind-units-${name}-${PKGVER}-any.pkg.tar.zst" /arch/os/x86_64/
-            cp "$work/pkgdest/rind-units-${name}-${PKGVER}-any.pkg.tar.zst.sig" /arch/os/x86_64/ 2>/dev/null || true
-            repo-add --sign /arch/os/x86_64/rind.db.tar.zst "/arch/os/x86_64/rind-units-${name}-${PKGVER}-any.pkg.tar.zst"
-          done
-          SCRIPTCP
-
-          chmod +x /tmp/build-comps.sh
-
-          docker run --rm \
-            -e VER="$VER" \
-            -e REL="$REL" \
-            -e COMP_NAMES="$COMP_NAMES" \
-            -v "$(pwd)/components:/components:ro" \
-            -v /tmp/arch:/arch:rw \
-            -v /tmp/arch-keys:/keys:ro \
-            -v /tmp/build-comps.sh:/build-comps.sh:ro \
-            archlinux:latest \
-            /bin/bash /build-comps.sh
-
-      - name: Export public key
-        run: |
-          cp /tmp/arch-keys/pub.asc /tmp/arch/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: arch-repo
-          path: /tmp/arch
-
-  void-repo:
-    name: Void Linux package
-    needs: [version, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: rind-*-unknown-linux-gnu
-          path: /tmp/artifacts
-
-      - name: Generate Void signing key
-        run: |
-          openssl genrsa -out /tmp/void-key.pem 2048
-          openssl rsa -in /tmp/void-key.pem -pubout -out /tmp/void-key.pub
-
-      - name: Create Void packages and repo
-        run: |
-          VER=${{ needs.version.outputs.ver }}
-          REL=${{ needs.version.outputs.rel }}
-          mkdir -p /tmp/void
-
-          COMP_NAMES=""
-          for comp in components/*/; do
-            COMP_NAMES="$COMP_NAMES $(basename "$comp")"
-          done
-
-          docker run --rm \
-            -e VER="$VER" \
-            -e REL="$REL" \
-            -e COMP_NAMES="$COMP_NAMES" \
-            -v /tmp/artifacts:/artifacts:ro \
-            -v /tmp/void:/void:rw \
-            -v /tmp/void-key.pem:/void-key.pem:ro \
-            -v "$(pwd)/components:/components:ro" \
-            voidlinux/voidlinux:latest \
-            sh -c '
-            set -e
-
-            mkdir -p /void/stage
-            cd /void/stage
-
-            for arch in x86_64 aarch64; do
-              target="${arch}-unknown-linux-gnu"
-              rm -rf /build
-              pkgdir="/build/rind-${target}"
-              mkdir -p "$pkgdir"
-              tar xzf "/artifacts/rind-${target}/rind-${target}.tar.gz" -C "$pkgdir"
-
-              xbps-create \
-                -A "${arch}" \
-                -n "rind-${VER}_${REL}" \
-                -s "An experimental state-based init system" \
-                --homepage "https://codeberg.org/bushyice/rind" \
-                --license "MPL-2.0" \
-                "$pkgdir"
-            done
-
-            for name in $COMP_NAMES; do
-              rm -rf /build
-              staging="/build/${name}"
-              mkdir -p "$staging/usr/lib/rind/units" "$staging/usr/lib/rind/hooks"
-
-              src="/components/${name}"
-              [ -d "$src/units" ] && cp -r "$src/units/"* "$staging/usr/lib/rind/units/"
-              [ -d "$src/hooks" ] && cp -r "$src/hooks/"* "$staging/usr/lib/rind/hooks/"
-
-              xbps-create \
-                -A noarch \
-                -n "rind-units-${name}-${VER}_${REL}" \
-                -s "Rind units and hooks -- ${name}" \
-                --homepage "https://codeberg.org/bushyice/rind" \
-                --license "MPL-2.0" \
-                "$staging"
-            done
-
-            xbps-rindex -a *.xbps
-            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
-
-            ls -la /void/stage/
-            find /void/stage -type f | head -20
-
-            mv /void/stage/* /void/
-            rmdir /void/stage
-            ls -la /void/
-            '
-
-      - name: Export public key
-        run: |
-          cp /tmp/void-key.pub /tmp/void/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: void-repo
-          path: /tmp/void
-
-  pages:
-    name: Deploy package repos to Pages
-    needs: [arch-repo, void-repo]
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: "*-repo"
-          path: /tmp/repos
-
-      - name: Combine repos
-        run: |
-          mkdir -p /tmp/pages/arch /tmp/pages/void
-          cp -r /tmp/repos/arch-repo/* /tmp/pages/arch/
-          cp -r /tmp/repos/void-repo/* /tmp/pages/void/
-          cp /tmp/repos/arch-repo/pub.asc /tmp/pages/rind-gpg-public.asc 2>/dev/null || true
-          cp /tmp/repos/void-repo/void-key.pub /tmp/pages/ 2>/dev/null || true
-          ls -laR /tmp/pages
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: /tmp/pages
-
-      - name: Deploy to Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
   release:
     name: Release assets
-    needs: [version, build, arch-repo, void-repo]
+    needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -419,28 +143,14 @@ jobs:
         with:
           path: /tmp/artifacts
 
-      - name: Determine tag
-        id: tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
-            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-            echo "tag=${TAG:-rolling}" >> $GITHUB_OUTPUT
-            echo "create=$([[ -z "$TAG" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-            echo "create=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create release
-        if: steps.tag.outputs.create == 'true'
+        if: needs.version.outputs.create_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create '${{ steps.tag.outputs.tag }}' \
-            --title '${{ steps.tag.outputs.tag }}' \
-            --notes 'Rind packaged release ${{ steps.tag.outputs.tag }}' \
+          gh release create '${{ needs.version.outputs.tag }}' \
+            --title '${{ needs.version.outputs.tag }}' \
+            --notes 'Rind packaged release '${{ needs.version.outputs.tag }} \
             || true
 
       - name: Upload assets
@@ -448,11 +158,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for asset in /tmp/artifacts/rind-*-unknown-linux-gnu/*.tar.gz; do
-            gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
-          done
-          for asset in /tmp/artifacts/arch-repo/os/*/rind-*.pkg.tar.zst; do
-            gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
-          done
-          for asset in /tmp/artifacts/void-repo/rind-*.xbps; do
-            gh release upload '${{ steps.tag.outputs.tag }}' "$asset" --clobber
+            gh release upload '${{ needs.version.outputs.tag }}' "$asset" --clobber
           done
