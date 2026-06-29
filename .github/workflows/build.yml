@@ -3,7 +3,7 @@ name: Build and package Rind
 on:
   push:
     tags:
-      - '*'
+      - "*"
   workflow_dispatch:
 
 env:
@@ -314,12 +314,11 @@ jobs:
 
             xbps-rindex -a *.xbps
 
-            mkdir -p /void/repodata
             if [ -d repodata ]; then
-              mv repodata/* /void/repodata/
+              mv repodata/* /void/
             fi
-            mv *-repodata /void/repodata/ 2>/dev/null || true
-            ls -la /void/repodata/
+            mv *-repodata /void/ 2>/dev/null || true
+            ls -la /void/
 
             for f in *.xbps; do
               case "$f" in
@@ -350,7 +349,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-repo'
+          pattern: "*-repo"
           path: /tmp/repos
 
       - name: Combine repos
