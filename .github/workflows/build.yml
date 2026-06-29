@@ -314,7 +314,12 @@ jobs:
 
             xbps-rindex -a *.xbps
 
-            mv repodata /void/
+            mkdir -p /void/repodata
+            if [ -d repodata ]; then
+              mv repodata/* /void/repodata/
+            fi
+            mv *-repodata /void/repodata/ 2>/dev/null || true
+            ls -la /void/repodata/
 
             for f in *.xbps; do
               case "$f" in
