@@ -353,7 +353,7 @@ jobs:
                 "$staging"
             done
 
-            xbps-rindex -a *.xbps
+            xbps-rindex -a --sign-pkg --privkey /void-key.pem *.xbps
             xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
             if [ -d repodata ]; then
@@ -362,11 +362,12 @@ jobs:
             mv *-repodata /void/ 2>/dev/null || true
             ls -la /void/
 
-            for f in *.xbps; do
+            for f in *.xbps *.sig; do
+              [ -f "$f" ] || continue
               case "$f" in
-                *.x86_64.xbps) mkdir -p /void/x86_64; mv "$f" /void/x86_64/ ;;
-                *.aarch64.xbps) mkdir -p /void/aarch64; mv "$f" /void/aarch64/ ;;
-                *.noarch.xbps) mkdir -p /void/noarch; mv "$f" /void/noarch/ ;;
+                *.x86_64.xbps|*.x86_64.xbps.sig) mkdir -p /void/x86_64; mv "$f" /void/x86_64/ ;;
+                *.aarch64.xbps|*.aarch64.xbps.sig) mkdir -p /void/aarch64; mv "$f" /void/aarch64/ ;;
+                *.noarch.xbps|*.noarch.xbps.sig) mkdir -p /void/noarch; mv "$f" /void/noarch/ ;;
               esac
             done
 
