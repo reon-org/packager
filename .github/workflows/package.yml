@@ -12,19 +12,45 @@ jobs:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
-      run-id: ${{ steps.r.outputs.run-id }}
+      release-tag: ${{ steps.r.outputs.release-tag }}
     steps:
+      - uses: actions/checkout@v4
       - id: r
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ '${{ github.event_name }}' == 'workflow_run' ]]; then
-            echo "run-id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
+            ID=${{ github.event.workflow_run.id }}
+            echo "release-tag=run-$ID" >> $GITHUB_OUTPUT
+            echo "RUN_ID=$ID" >> $GITHUB_ENV
           else
-            ID=$(gh run list --workflow "Build Rind" --status success --limit 1 \
-                 --json databaseId --jq '.[0].databaseId')
-            echo "run-id=$ID" >> $GITHUB_OUTPUT
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+            echo "release-tag=$TAG" >> $GITHUB_OUTPUT
+            echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
           fi
+
+      - name: Download build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/build
+          if [[ '${{ github.event_name }}' == 'workflow_run' ]]; then
+            gh run download "$RUN_ID" --dir /tmp/build
+          else
+            gh release download "$RELEASE_TAG" --dir /tmp/build
+            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+              f="/tmp/build/rind-${target}.tar.gz"
+              if [ -f "$f" ]; then
+                mkdir -p "/tmp/build/rind-${target}"
+                mv "$f" "/tmp/build/rind-${target}/"
+              fi
+            done
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: /tmp/build
 
   version:
     needs: [build-run]
@@ -36,16 +62,22 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: version-info
-          run-id: ${{ needs.build-run.outputs.run-id }}
-          github-token: ${{ github.token }}
-          path: /tmp/version-info
+          name: build-outputs
+          path: /tmp/build
 
       - id: v
         run: |
-          echo "ver=$(cat /tmp/version-info/ver)" >> $GITHUB_OUTPUT
-          echo "rel=$(cat /tmp/version-info/rel)" >> $GITHUB_OUTPUT
-          echo "tag=$(cat /tmp/version-info/tag)" >> $GITHUB_OUTPUT
+          if [ -f /tmp/build/version-info/ver ]; then
+            echo "ver=$(cat /tmp/build/version-info/ver)" >> $GITHUB_OUTPUT
+            echo "rel=$(cat /tmp/build/version-info/rel)" >> $GITHUB_OUTPUT
+            echo "tag=$(cat /tmp/build/version-info/tag)" >> $GITHUB_OUTPUT
+          else
+            TAG=${{ needs.build-run.outputs.release-tag }}
+            VER="${TAG#v}"
+            echo "ver=$VER" >> $GITHUB_OUTPUT
+            echo "rel=1" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+          fi
 
   arch-repo:
     name: Arch Linux package
@@ -56,10 +88,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: rind-x86_64-unknown-linux-gnu
+          name: build-outputs
           path: /tmp/artifacts
-          run-id: ${{ needs.build-run.outputs.run-id }}
-          github-token: ${{ github.token }}
 
       - name: Generate GPG signing key
         run: |
@@ -233,10 +263,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: rind-*-unknown-linux-gnu
+          name: build-outputs
           path: /tmp/artifacts
-          run-id: ${{ needs.build-run.outputs.run-id }}
-          github-token: ${{ github.token }}
 
       - name: Generate Void signing key
         run: |
