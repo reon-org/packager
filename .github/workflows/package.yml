@@ -45,6 +45,28 @@ jobs:
                 mv "$f" "/tmp/build/rind-${target}/"
               fi
             done
+            mkdir -p /tmp/build/version-info
+            tar xzf /tmp/build/rind-x86_64-unknown-linux-gnu/rind-x86_64-unknown-linux-gnu.tar.gz \
+              -C /tmp/build/rind-x86_64-unknown-linux-gnu --strip-components=0 2>/dev/null || true
+            # rind binary is at /tmp/build/rind-x86_64-unknown-linux-gnu/usr/bin/rind
+            BIN="/tmp/build/rind-x86_64-unknown-linux-gnu/usr/bin/rind"
+            if [ -x "$BIN" ]; then
+              OUT=$("$BIN" --version)
+              FULL=${OUT#rind }
+              SEMVER=$(echo "$FULL" | cut -d- -f1)
+              COMMIT=$(echo "$FULL" | cut -d- -f2)
+              BUILD_HEX=$(echo "$FULL" | cut -d- -f3)
+              TS=$(printf "%d" 0x"$BUILD_HEX" 2>/dev/null || echo 0)
+              DATE_VER=$(date -d "@$TS" +%Y.%m.%d 2>/dev/null || date +%Y.%m.%d)
+              echo "$DATE_VER" > /tmp/build/version-info/ver
+              echo "1" > /tmp/build/version-info/rel
+              echo "$RELEASE_TAG" > /tmp/build/version-info/tag
+            else
+              echo "WARNING: rind binary not found, fallback version"
+              echo "$(date +%Y.%m.%d)" > /tmp/build/version-info/ver
+              echo "1" > /tmp/build/version-info/rel
+              echo "$RELEASE_TAG" > /tmp/build/version-info/tag
+            fi
           fi
 
       - uses: actions/upload-artifact@v4
@@ -73,12 +95,7 @@ jobs:
             echo "tag=$(cat /tmp/build/version-info/tag)" >> $GITHUB_OUTPUT
           else
             TAG=${{ needs.build-run.outputs.release-tag }}
-            if [[ "$TAG" == rolling ]]; then
-              VER=$(date +%Y.%m.%d)
-            else
-              VER="${TAG#v}"
-            fi
-            echo "ver=$VER" >> $GITHUB_OUTPUT
+            echo "ver=$(date +%Y.%m.%d)" >> $GITHUB_OUTPUT
             echo "rel=1" >> $GITHUB_OUTPUT
             echo "tag=$TAG" >> $GITHUB_OUTPUT
           fi
@@ -339,10 +356,9 @@ jobs:
 
             cd /void
             xbps-rindex -a -f *.xbps
-            xbps-rindex --sign --signedby "Rind CI" --privkey /void-key.pem .
             xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
             for f in *.xbps.sig; do cp "$f" "${f%.sig}.sig2"; done
-            # openssl dgst -sha256 -sign /void-key.pem -out x86_64-repodata.sig x86_64-repodata
+            openssl dgst -sha256 -sign /void-key.pem -out x86_64-repodata.sig x86_64-repodata
             '
 
       - name: Export public key and index.html

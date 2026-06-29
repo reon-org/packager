@@ -10,50 +10,8 @@ env:
   RIND_REPO: https://codeberg.org/bushyice/rind.git
 
 jobs:
-  version:
-    runs-on: ubuntu-latest
-    outputs:
-      ver: ${{ steps.v.outputs.ver }}
-      rel: ${{ steps.v.outputs.rel }}
-      tag: ${{ steps.v.outputs.tag }}
-      create_release: ${{ steps.v.outputs.create_release }}
-    steps:
-      - uses: actions/checkout@v4
-      
-      - id: v
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [[ '${{ github.event_name }}' == 'push' && '${{ github.ref_type }}' == 'tag' ]]; then
-            TAG=${{ github.ref_name }}
-            echo "ver=${TAG#v}" >> $GITHUB_OUTPUT
-            echo "rel=1" >> $GITHUB_OUTPUT
-            echo "tag=$TAG" >> $GITHUB_OUTPUT
-            echo "create_release=true" >> $GITHUB_OUTPUT
-          else
-            echo "ver=$(date +%Y.%m.%d)" >> $GITHUB_OUTPUT
-            echo "rel=1" >> $GITHUB_OUTPUT
-            LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-            echo "tag=${LATEST_TAG:-rolling}" >> $GITHUB_OUTPUT
-            echo "create_release=$([[ -z "$LATEST_TAG" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
-          fi
-          
-      - name: Save version info
-        run: |
-          mkdir /tmp/version-info
-          echo "${{ steps.v.outputs.ver }}" > /tmp/version-info/ver
-          echo "${{ steps.v.outputs.rel }}" > /tmp/version-info/rel
-          echo "${{ steps.v.outputs.tag }}" > /tmp/version-info/tag
-          echo "${{ steps.v.outputs.create_release }}" > /tmp/version-info/create_release
-          
-      - uses: actions/upload-artifact@v4
-        with:
-          name: version-info
-          path: /tmp/version-info
-
   build:
     name: ${{ matrix.target }}
-    needs: version
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -130,6 +88,153 @@ jobs:
           name: rind-${{ matrix.target }}
           path: /tmp/rind-${{ matrix.target }}.tar.gz
 
+  version:
+    needs: [build]
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.v.outputs.ver }}
+      rel: ${{ steps.v.outputs.rel }}
+      tag: ${{ steps.v.outputs.tag }}
+      semver: ${{ steps.v.outputs.semver }}
+      create_release: ${{ steps.v.outputs.create_release }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rind-x86_64-unknown-linux-gnu
+          path: /tmp/rind-artifact
+
+      - name: Clone rind source (for git log)
+        run: git clone ${{ env.RIND_REPO }} /tmp/rind-src
+
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar xzf /tmp/rind-artifact/rind-x86_64-unknown-linux-gnu.tar.gz -C /tmp/extract
+          OUT=$(/tmp/extract/usr/bin/rind --version)
+          FULL=${OUT#rind }
+          SEMVER=$(echo "$FULL" | cut -d- -f1)
+          COMMIT=$(echo "$FULL" | cut -d- -f2)
+          BUILD_HEX=$(echo "$FULL" | cut -d- -f3)
+          TS=$(printf "%d" 0x"$BUILD_HEX" 2>/dev/null || echo 0)
+          DATE_VER=$(date -d "@$TS" +%Y.%m.%d 2>/dev/null || date +%Y.%m.%d)
+          TAG="${SEMVER}-${COMMIT}"
+          echo "ver=$DATE_VER" >> $GITHUB_OUTPUT
+          echo "rel=1" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "semver=$SEMVER" >> $GITHUB_OUTPUT
+          if gh release view "$TAG" --json tagName --jq '.tagName' &>/dev/null; then
+            echo "create_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "create_release=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Save version info
+        run: |
+          mkdir -p /tmp/version-info
+          for k in ver rel tag semver create_release; do
+            printf '%s\n' "${{ steps.v.outputs[k] }}" > "/tmp/version-info/$k"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: version-info
+          path: /tmp/version-info
+
+      - name: Generate release notes
+        if: steps.v.outputs.create_release == 'true'
+        run: |
+          cd /tmp/rind-src
+          PREV_TAG=$(gh release list --limit 2 --json tagName --jq '.[1].tagName' 2>/dev/null || echo '')
+          if [ -z "$PREV_TAG" ]; then
+            echo '**Initial packaged release** of rind ${{ steps.v.outputs.semver }}' > /tmp/release-notes.md
+          else
+            PREV=$(echo "$PREV_TAG" | grep -oP '(?<=-)[a-f0-9]+$')
+            CUR='${{ steps.v.outputs.tag }}'
+            CUR_HASH="${CUR##*-}"
+            if [ "$PREV" = "$CUR_HASH" ]; then
+              echo 'No changes since last release' > /tmp/release-notes.md
+            else
+              python3 << 'PYEOF' > /tmp/release-notes.md
+import re, subprocess
+
+prev = '$PREV'
+cur = '$CUR_HASH'
+log = subprocess.run(['git', 'log', '--oneline', f'{prev}..{cur}'],
+                     capture_output=True, text=True).stdout
+lines = [l.strip() for l in log.strip().split('\n') if l.strip()]
+
+added = {}
+removed = []
+modified = []
+wips = {}
+
+for line in lines:
+    parts = line.split(' ', 1)
+    if len(parts) < 2:
+        continue
+    msg = parts[1]
+    msg = re.sub(r'!\S+', '', msg).strip()
+
+    m = re.match(r'\+(?P<name>\w+)(?:{(?P<subs>[^}]+)})?(?::wip<(?P<wip>[^>]+)>)?$', msg)
+    if m:
+        name = m.group('name')
+        subs = m.group('subs')
+        wipv = m.group('wip')
+        if wipv:
+            wips[name] = wipv
+        elif subs:
+            added[name] = subs.split(',')
+        else:
+            added.setdefault(name, [])
+        continue
+
+    m = re.match(r'\-(?P<name>\w+)', msg)
+    if m:
+        removed.append(m.group('name'))
+        continue
+
+    m = re.match(r'~(?P<name>\w+)', msg)
+    if m:
+        modified.append(m.group('name'))
+        continue
+
+out = []
+if added:
+    out.append('### Added')
+    for name, subs in sorted(added.items()):
+        if subs:
+            out.append(f'  - {name}: {", ".join(subs)}')
+        else:
+            out.append(f'  - {name}')
+if removed:
+    if not out:
+        out.append('### Removed')
+    for name in sorted(removed):
+        out.append(f'  - {name}')
+if modified:
+    out.append('')
+    out.append('### Modified')
+    for name in sorted(modified):
+        out.append(f'  - {name}')
+if wips:
+    out.append('')
+    out.append('### Work in Progress')
+    for name, ver in sorted(wips.items()):
+        out.append(f'  - {name} (WIP, v{ver})')
+if not out:
+    out.append('Miscellaneous changes')
+print('\n'.join(out))
+PYEOF
+            fi
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.v.outputs.create_release == 'true'
+        with:
+          name: release-notes
+          path: /tmp/release-notes.md
+
   release:
     name: Release assets
     needs: [version, build]
@@ -137,20 +242,26 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/artifacts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: /tmp
+        continue-on-error: true
 
       - name: Create release
         if: needs.version.outputs.create_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          NOTES_ARGS=()
+          [ -f /tmp/release-notes.md ] && NOTES_ARGS=(--notes-file /tmp/release-notes.md)
           gh release create '${{ needs.version.outputs.tag }}' \
-            --title '${{ needs.version.outputs.tag }}' \
-            --notes 'Rind packaged release '${{ needs.version.outputs.tag }} \
+            --title 'rind ${{ needs.version.outputs.semver }} (${{ needs.version.outputs.tag }})' \
+            "${NOTES_ARGS[@]}" \
             || true
 
       - name: Upload assets
