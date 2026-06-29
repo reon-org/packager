@@ -104,8 +104,6 @@ jobs:
           path: /tmp/rind-artifact
 
       - uses: actions/checkout@v4
-        with:
-          path: /tmp/packager
 
       - name: Clone rind source (for git log)
         run: git clone ${{ env.RIND_REPO }} /tmp/rind-src
@@ -161,7 +159,7 @@ jobs:
             if [ "$PREV" = "$CUR_HASH" ]; then
               echo 'No changes since last release' > /tmp/release-notes.md
             else
-              python3 /tmp/packager/.github/scripts/gen-notes.py "$PREV" "$CUR_HASH" > /tmp/release-notes.md
+              python3 $GITHUB_WORKSPACE/.github/scripts/gen-notes.py "$PREV" "$CUR_HASH" > /tmp/release-notes.md
             fi
           fi
 
