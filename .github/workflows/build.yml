@@ -361,7 +361,6 @@ jobs:
             cd /void
             xbps-rindex -a x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
             xbps-rindex --sign-pkg --privkey /void-key.pem x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
-            xbps-rindex --sign --privkey /void-key.pem --signedby "Rind CI" .
 
             rm -rf /void/stage
             '
