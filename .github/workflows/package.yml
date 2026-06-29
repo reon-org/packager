@@ -5,7 +5,8 @@ on:
     workflows: ["Build Rind"]
     types:
       - completed
-
+  workflow_dispatch:
+  
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -190,9 +191,15 @@ jobs:
             archlinux:latest \
             /bin/bash /build-comps.sh
 
-      - name: Export public key
+      - name: Export public key and index.html
         run: |
           cp /tmp/arch-keys/pub.asc /tmp/arch/
+          cd /tmp/arch
+          {
+            echo '<!DOCTYPE html><title>rind arch repo</title><ul>'
+            for f in $(find . -type f | sort); do echo "<li><a href=\"$f\">$f</a></li>"; done
+            echo '</ul>'
+          } > index.html
 
       - uses: actions/upload-artifact@v4
         with:
@@ -278,21 +285,24 @@ jobs:
                 "$staging"
             done
 
-            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
             xbps-rindex -a *.xbps
-            xbps-rindex --sign --signedby "Rind CI" --privkey /void-key.pem $PWD
+            xbps-rindex --sign --signedby "Rind CI" --privkey /void-key.pem .
 
-            ls -la /void/stage/
-            find /void/stage -type f | head -20
+            xbps-rindex --sign-pkg --privkey /void-key.pem *.xbps
 
             mv /void/stage/* /void/
             rmdir /void/stage
-            ls -la /void/
             '
 
-      - name: Export public key
+      - name: Export public key and index.html
         run: |
           cp /tmp/void-key.pub /tmp/void/
+          cd /tmp/void
+          {
+            echo '<!DOCTYPE html><title>rind void repo</title><ul>'
+            for f in *; do echo "<li><a href=\"$f\">$f</a></li>"; done
+            echo '</ul>'
+          } > index.html
 
       - uses: actions/upload-artifact@v4
         with:
@@ -355,5 +365,8 @@ jobs:
             gh release upload '${{ needs.version.outputs.tag }}' "$asset" --clobber
           done
           for asset in /tmp/artifacts/void-repo/rind-*.xbps; do
+            gh release upload '${{ needs.version.outputs.tag }}' "$asset" --clobber
+          done
+          for asset in /tmp/artifacts/void-repo/*repodata*; do
             gh release upload '${{ needs.version.outputs.tag }}' "$asset" --clobber
           done
