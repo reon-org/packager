@@ -362,6 +362,12 @@ jobs:
             xbps-rindex -a x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
             xbps-rindex --sign-pkg --privkey /void-key.pem x86_64/*.xbps aarch64/*.xbps noarch/*.xbps
 
+            find /void -name '*-repodata' -exec mv {} /void/ \; 2>/dev/null || true
+            ls -la /void/
+            ls -la /void/x86_64/ 2>/dev/null || true
+            ls -la /void/aarch64/ 2>/dev/null || true
+            ls -la /void/noarch/ 2>/dev/null || true
+
             rm -rf /void/stage
             '
 
